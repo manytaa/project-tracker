@@ -2,19 +2,17 @@ import streamlit as st
 import pandas as pd
 from supabase import create_client, Client
 from datetime import datetime, date
+import jdatetime
 
 # -----------------------
-# CONFIGURATION
+# CONFIG
 # -----------------------
 SUPABASE_URL = "https://duukgbkrjrzbvwvttfes.supabase.co"
-SUPABASE_KEY = "sb_publishable_PjcqSjNTEaLUlb17Go_4XA_ckbRpHLo"  # publishable key
+SUPABASE_KEY = "sb_publishable_PjcqSjNTEaLUlb17Go_4XA_ckbRpHLo"
 ADMIN_PASSWORD = "1234"
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# -----------------------
-# PAGE SETUP
-# -----------------------
 st.set_page_config(
     page_title="کنترل پروژه Z Group",
     layout="wide",
@@ -22,89 +20,111 @@ st.set_page_config(
 )
 
 # -----------------------
+# DATE HANDLING
+# -----------------------
+
+def jalali_to_gregorian(jdate):
+    try:
+        y, m, d = map(int, str(jdate).split("-"))
+        return jdatetime.date(y, m, d).togregorian()
+    except:
+        return date.today()
+
+def gregorian_to_jalali(gdate):
+    if not gdate:
+        return "بدون ددلاین"
+    y, m, d = map(int, str(gdate).split("-"))
+    return str(jdatetime.date.fromgregorian(year=y, month=m, day=d))
+
+
+# -----------------------
 # SUPABASE FUNCTIONS
 # -----------------------
+
 def get_projects():
     res = supabase.table("projects").select("*").order("id", desc=True).execute()
     return pd.DataFrame(res.data)
 
-def add_project(name, desc, start, end):
+def add_project(name, desc, start, end, no_deadline):
     supabase.table("projects").insert({
         "name": name,
         "description": desc,
         "start_date": str(start),
-        "end_date": str(end)
+        "end_date": None if no_deadline else str(end)
     }).execute()
 
 def get_tasks(pid):
-    res = supabase.table("tasks").select("*").eq("project_id", pid).order("id").execute()
+    res = supabase.table("tasks").select("*").eq("project_id", int(pid)).order("id").execute()
     return pd.DataFrame(res.data)
 
-def add_task(pid, name, desc, progress, owner, due):
+def add_task(pid, name, desc, progress, owner, due, no_deadline):
     supabase.table("tasks").insert({
-        "project_id": pid,
+        "project_id": int(pid),
         "name": name,
         "description": desc,
-        "progress": progress,
+        "progress": int(progress),
         "owner": owner,
-        "due_date": str(due),
+        "due_date": None if no_deadline else str(due),
     }).execute()
 
 def update_task_progress(tid, progress):
-    supabase.table("tasks").update({"progress": progress}).eq("id", tid).execute()
+    supabase.table("tasks").update({
+        "progress": int(progress)
+    }).eq("id", int(tid)).execute()
 
 def get_minutes(pid):
-    res = supabase.table("minutes").select("*").eq("project_id", pid).order("meeting_date", desc=True).execute()
+    res = supabase.table("minutes").select("*").eq("project_id", int(pid)).order("meeting_date", desc=True).execute()
     return pd.DataFrame(res.data)
 
 def add_minute(pid, d, title, content):
     supabase.table("minutes").insert({
-        "project_id": pid,
+        "project_id": int(pid),
         "meeting_date": str(d),
         "title": title,
         "content": content
     }).execute()
 
 def get_task_comments(tid):
-    res = supabase.table("task_comments").select("*").eq("task_id", tid).order("id", desc=True).execute()
+    res = supabase.table("task_comments").select("*").eq("task_id", int(tid)).order("id", desc=True).execute()
     return pd.DataFrame(res.data)
 
 def add_task_comment(tid, author, content):
     supabase.table("task_comments").insert({
-        "task_id": tid,
+        "task_id": int(tid),
         "author": author,
         "content": content
     }).execute()
 
 def get_minute_comments(mid):
-    res = supabase.table("minute_comments").select("*").eq("minute_id", mid).order("id", desc=True).execute()
+    res = supabase.table("minute_comments").select("*").eq("minute_id", int(mid)).order("id", desc=True).execute()
     return pd.DataFrame(res.data)
 
 def add_minute_comment(mid, author, content):
     supabase.table("minute_comments").insert({
-        "minute_id": mid,
+        "minute_id": int(mid),
         "author": author,
         "content": content
     }).execute()
 
 # -----------------------
-# SUBTASKS FUNCTIONS
+# SUBTASKS
 # -----------------------
+
 def get_subtasks(task_id):
-    res = supabase.table("subtasks").select("*").eq("task_id", task_id).order("id").execute()
+    res = supabase.table("subtasks").select("*").eq("task_id", int(task_id)).order("id").execute()
     return pd.DataFrame(res.data)
 
 def add_subtask(task_id, name, progress):
     supabase.table("subtasks").insert({
-        "task_id": task_id,
+        "task_id": int(task_id),
         "name": name,
-        "progress": progress
+        "progress": int(progress)
     }).execute()
 
 def update_subtask_progress(subtask_id, progress):
     supabase.table("subtasks").update({
-        "progress": progress
-    }).eq("id", subtask_id).execute()
+        "progress": int(progress)
+    }).eq("id", int(subtask_id)).execute()
 
 def calculate_task_progress_from_subtasks(task_id):
     subs = get_subtasks(task_id)
@@ -112,24 +132,20 @@ def calculate_task_progress_from_subtasks(task_id):
         return None
     return int(subs["progress"].mean())
 
-# برای درصد پروژه از روی تسک‌ها (با درنظر گرفتن زیرتسک‌ها)
 def calculate_project_progress(tasks_df):
     if tasks_df.empty:
         return 0
-    effective = []
-    for _, row in tasks_df.iterrows():
-        auto = calculate_task_progress_from_subtasks(row["id"])
-        if auto is not None:
-            effective.append(auto)
-        else:
-            effective.append(row["progress"])
-    if not effective:
-        return 0
-    return int(sum(effective) / len(effective))
+    values = []
+    for _, t in tasks_df.iterrows():
+        auto = calculate_task_progress_from_subtasks(t["id"])
+        values.append(auto if auto is not None else t["progress"])
+    return int(sum(values) / len(values))
+
 
 # -----------------------
-# STYLES
+# PAGE UI
 # -----------------------
+
 st.markdown("""
 <style>
 .big-title {
@@ -142,27 +158,20 @@ st.markdown("""
 .section-title {
     font-size: 22px !important;
     font-weight: 700 !important;
-    margin-top: 30px;
     color: #1565C0;
-}
-.card {
-    background-color: #F8F9FA;
-    padding: 18px;
-    border-radius: 12px;
-    border: 1px solid #E0E0E0;
-    margin-bottom: 15px;
 }
 .sub-card {
     background-color: #FFFFFF;
-    padding: 10px 14px;
+    padding: 12px;
     border-radius: 10px;
     border: 1px solid #E0E0E0;
-    margin-bottom: 8px;
+    margin-bottom: 6px;
 }
 </style>
 """, unsafe_allow_html=True)
 
 st.markdown("<div class='big-title'>📊 نرم‌افزار کنترل پروژه Z Group</div>", unsafe_allow_html=True)
+
 
 # -----------------------
 # SIDEBAR
@@ -176,271 +185,207 @@ if mode == "🔍 نمایش پروژه‌ها":
     projects = get_projects()
 
     if projects.empty:
-        st.info("هیچ پروژه‌ای ثبت نشده است.")
+        st.info("پروژه‌ای ثبت نشده.")
         st.stop()
 
-    selected_name = st.selectbox("انتخاب پروژه", projects["name"].tolist())
-    project = projects[projects["name"] == selected_name].iloc[0]
-    pid = project["id"]
+    pname = st.selectbox("انتخاب پروژه", projects["name"].tolist())
+    proj = projects[projects["name"] == pname].iloc[0]
+    pid = proj["id"]
 
-    st.markdown(f"<div class='section-title'>📁 پروژه: {project['name']}</div>", unsafe_allow_html=True)
-    st.write(project["description"])
+    st.markdown(f"<div class='section-title'>📁 پروژه: {proj['name']}</div>", unsafe_allow_html=True)
+    st.write(proj["description"])
 
     col1, col2 = st.columns(2)
-    col1.write(f"📅 تاریخ شروع: **{project['start_date']}**")
-    col2.write(f"⏳ تاریخ پایان: **{project['end_date']}**")
+    col1.write(f"📅 تاریخ شروع: **{gregorian_to_jalali(proj['start_date'])}**")
+    col2.write(f"⏳ پایان: **{gregorian_to_jalali(proj['end_date'])}**")
 
+    # Tasks
     tasks = get_tasks(pid)
-
     if not tasks.empty:
-        avg_project = calculate_project_progress(tasks)
-        st.metric("درصد پیشرفت پروژه (بر اساس تسک‌ها و زیرتسک‌ها)", f"{avg_project}%")
 
-        st.subheader("🧱 تسک‌ها")
-        st.dataframe(tasks[["id", "name", "description", "owner", "due_date", "progress"]],
-                     use_container_width=True)
+        avg_proj = calculate_project_progress(tasks)
+        st.metric("درصد پیشرفت پروژه", f"{avg_proj}%")
 
-        # انتخاب تسک برای کامنت و زیرتسک
-        st.subheader("🔎 جزئیات تسک")
-        task_label = st.selectbox(
-            "انتخاب تسک",
-            tasks.apply(lambda r: f"{r['id']} - {r['name']}", axis=1).tolist(),
-            key="view_task_select"
+        st.dataframe(tasks, use_container_width=True)
+
+        st.subheader("🔎 انتخاب تسک")
+        tlabel = st.selectbox(
+            "تسک:",
+            tasks.apply(lambda r: f"{r['id']} - {r['name']}", axis=1).tolist()
         )
-        selected_task_id = int(task_label.split(" - ")[0])
-        selected_task_row = tasks[tasks["id"] == selected_task_id].iloc[0]
+        tid = int(tlabel.split(" - ")[0])
 
-        auto_task_prog = calculate_task_progress_from_subtasks(selected_task_id)
-        st.write(f"🔹 درصد ثبت‌شده تسک: **{selected_task_row['progress']}%**")
-        if auto_task_prog is not None:
-            st.info(f"🔹 درصد محاسبه‌شده از روی زیرتسک‌ها: **{auto_task_prog}%**")
+        sel_task = tasks[tasks["id"] == tid].iloc[0]
 
-        # کامنت‌های تسک
-        st.subheader("💬 کامنت‌های تسک")
-        comments = get_task_comments(selected_task_id)
-        if comments.empty:
-            st.info("هنوز کامنتی ثبت نشده.")
+        auto_prog = calculate_task_progress_from_subtasks(tid)
+        st.write(f"درصد ثبت‌شده: {sel_task['progress']}%")
+        if auto_prog is not None:
+            st.info(f"درصد محاسبه‌شده از زیرتسک‌ها: {auto_prog}%")
+
+        # Comments
+        st.subheader("💬 کامنت‌ها")
+        comments = get_task_comments(tid)
+        for _, c in comments.iterrows():
+            st.markdown(f"**{c['author'] or 'ناشناس'}**: {c['content']}")
+
+        author = st.text_input("نام شما", key="cname")
+        ctext = st.text_area("متن کامنت", key="ctxt")
+        if st.button("ارسال کامنت"):
+            if ctext.strip():
+                add_task_comment(tid, author or None, ctext.strip())
+                st.success("کامنت ثبت شد. صفحه را رفرش کنید.")
+
+        st.subheader("🔽 زیرتسک‌ها")
+        subs = get_subtasks(tid)
+        if subs.empty:
+            st.info("زیرتسکی ندارد.")
         else:
-            for _, c in comments.iterrows():
+            for _, sb in subs.iterrows():
                 st.markdown(
-                    f"**{c['author'] or 'ناشناس'}** ({c.get('created_at','')})‌: {c['content']}"
+                    f"<div class='sub-card'><b>{sb['name']}</b> — {sb['progress']}%</div>",
+                    unsafe_allow_html=True
                 )
 
-        author = st.text_input("نام شما", key="task_author_ui")
-        comment_text = st.text_area("متن کامنت", key="task_comment_ui")
-
-        if st.button("ثبت کامنت", key="btn_task_comment"):
-            if comment_text.strip():
-                add_task_comment(selected_task_id, author or None, comment_text.strip())
-                st.success("کامنت ثبت شد. صفحه را رفرش کنید.")
-            else:
-                st.warning("متن کامنت خالی است.")
-
-        # زیرتسک‌ها (نمایش)
-        st.subheader("🔽 زیرتسک‌ها")
-        subtasks = get_subtasks(selected_task_id)
-        if subtasks.empty:
-            st.info("برای این تسک هنوز زیرتسکی ثبت نشده.")
-        else:
-            for _, s in subtasks.iterrows():
-                with st.container():
-                    st.markdown(
-                        f"""
-                        <div class='sub-card'>
-                        <b>{s['name']}</b><br>
-                        پیشرفت: {s['progress']}%
-                        </div>
-                        """,
-                        unsafe_allow_html=True
-                    )
-
-    # صورت‌جلسه‌ها
+    # Minutes
     st.subheader("📝 صورت‌جلسه‌ها")
     minutes = get_minutes(pid)
     if minutes.empty:
-        st.info("هیچ صورت‌جلسه‌ای برای این پروژه ثبت نشده.")
+        st.info("صورت‌جلسه‌ای نیست.")
     else:
         for _, m in minutes.iterrows():
-            with st.expander(f"{m['meeting_date']} - {m['title']}"):
-                st.write(m["content"])
+            with st.expander(f"{gregorian_to_jalali(m['meeting_date'])} - {m['title']}"):
+                st.write(m['content'])
 
-                st.write("کامنت‌ها:")
-                m_comments = get_minute_comments(m["id"])
-                if m_comments.empty:
-                    st.info("کامنتی ثبت نشده.")
-                else:
-                    for _, c in m_comments.iterrows():
-                        st.markdown(f"**{c['author'] or 'ناشناس'}**: {c['content']}")
+                mcom = get_minute_comments(m["id"])
+                for _, c in mcom.iterrows():
+                    st.markdown(f"**{c['author'] or 'ناشناس'}**: {c['content']}")
 
-                a = st.text_input(f"نام شما (صورت‌جلسه {m['id']})", key=f"m_author_{m['id']}")
-                t = st.text_area("متن کامنت", key=f"m_text_{m['id']}")
+                an = st.text_input(f"نام شما ({m['id']})", key=f"mcname_{m['id']}")
+                tx = st.text_area("کامنت", key=f"mctxt_{m['id']}")
+                if st.button("ثبت کامنت", key=f"mbtn_{m['id']}"):
+                    if tx.strip():
+                        add_minute_comment(m["id"], an or None, tx.strip())
+                        st.success("ثبت شد.")
 
-                if st.button("ثبت کامنت صورت‌جلسه", key=f"m_btn_{m['id']}"):
-                    if t.strip():
-                        add_minute_comment(m["id"], a or None, t.strip())
-                        st.success("کامنت ثبت شد.")
-                    else:
-                        st.warning("متن کامنت خالی است.")
 
 # -----------------------
 # ADMIN MODE
 # -----------------------
 else:
     pwd = st.sidebar.text_input("رمز مدیریت", type="password")
-
     if pwd != ADMIN_PASSWORD:
-        st.error("رمز مدیریت اشتباه است.")
+        st.error("رمز اشتباه است.")
         st.stop()
 
-    st.success("✔️ وارد حالت مدیریت شدی.")
+    st.success("وارد شدید ✔️")
 
-    tab1, tab2, tab3 = st.tabs(["📁 پروژه‌ها", "🧱 تسک‌ها و زیرتسک‌ها", "📝 صورت‌جلسه"])
+    tab1, tab2, tab3 = st.tabs(["📁 پروژه‌ها", "🧱 تسک/زیرتسک", "📝 صورت‌جلسه"])
 
     # -----------------------
-    # TAB 1: PROJECTS
+    # PROJECTS
     # -----------------------
     with tab1:
-        st.subheader("➕ افزودن پروژه جدید")
+        st.subheader("➕ افزودن پروژه")
 
-        n = st.text_input("نام پروژه")
-        d = st.text_area("توضیحات پروژه", key="admin_proj_desc")
-        s = st.date_input("تاریخ شروع", value=date.today())
-        e = st.date_input("تاریخ پایان", value=date.today())
+        name = st.text_input("نام پروژه")
+        desc = st.text_area("توضیحات")
+        jstart = st.text_input("تاریخ شروع (مثال: 1403-02-15)", key="js1")
+        jend = st.text_input("تاریخ پایان (شمسی)", key="je1")
+        no_deadline = st.checkbox("بدون ددلاین پروژه")
 
-        if st.button("ثبت پروژه", key="btn_add_project"):
-            if n.strip():
-                add_project(n.strip(), d.strip(), s, e)
-                st.success("پروژه اضافه شد.")
+        if st.button("ثبت پروژه"):
+            if name.strip():
+                g_start = jalali_to_gregorian(jstart)
+                g_end = jalali_to_gregorian(jend) if not no_deadline else None
+                add_project(name, desc, g_start, g_end, no_deadline)
+                st.success("پروژه ثبت شد.")
             else:
-                st.warning("نام پروژه را وارد کن.")
+                st.warning("نام پروژه لازم است.")
 
         st.markdown("---")
-        st.subheader("لیست پروژه‌ها")
-        projects = get_projects()
-        if projects.empty:
-            st.info("پروژه‌ای وجود ندارد.")
-        else:
-            st.dataframe(projects, use_container_width=True)
+        st.dataframe(get_projects(), use_container_width=True)
 
     # -----------------------
-    # TAB 2: TASKS & SUBTASKS
+    # TASKS & SUBTASKS
     # -----------------------
     with tab2:
-        st.subheader("🧱 مدیریت تسک‌ها و زیرتسک‌ها")
+        st.subheader("🧱 مدیریت تسک‌ها")
 
-        projects = get_projects()
-        if projects.empty:
-            st.info("اول یک پروژه بساز.")
-        else:
-            pname = st.selectbox("انتخاب پروژه", projects["name"].tolist(), key="admin_task_proj")
-            p = projects[projects["name"] == pname].iloc[0]
-            pid = p["id"]
+        projs = get_projects()
+        pname = st.selectbox("انتخاب پروژه", projs["name"].tolist(), key="p2")
+        pid2 = projs[projs["name"] == pname].iloc[0]["id"]
 
-            st.markdown("### ➕ افزودن تسک")
-            tn = st.text_input("نام تسک", key="admin_task_name")
-            td = st.text_area("توضیحات تسک", key="admin_task_desc")
-            owner = st.text_input("مسئول", key="admin_task_owner")
-            due = st.date_input("مهلت تسک", value=date.today(), key="admin_task_due")
-            prog = st.slider("درصد پیشرفت (اگر زیرتسک نداری)", 0, 100, 0, key="admin_task_prog")
+        tname = st.text_input("نام تسک")
+        tdesc = st.text_area("توضیحات")
+        task_owner = st.text_input("مسئول")
+        jdue = st.text_input("مهلت (شمسی) مثال: 1403-01-20")
+        no_dl = st.checkbox("بدون ددلاین", key="ndl1")
+        tprog = st.slider("درصد پیشرفت", 0, 100, 0)
 
-            if st.button("افزودن تسک", key="btn_add_task"):
-                if tn.strip():
-                    add_task(pid, tn.strip(), td.strip(), prog, owner.strip(), due)
-                    st.success("تسک ثبت شد.")
-                else:
-                    st.warning("نام تسک را وارد کن.")
+        if st.button("افزودن تسک"):
+            g_due = jalali_to_gregorian(jdue) if not no_dl else None
+            add_task(pid2, tname, tdesc, tprog, task_owner, g_due, no_dl)
+            st.success("تسک اضافه شد.")
 
-            st.markdown("---")
-            st.markdown("### ✏️ ویرایش پیشرفت تسک‌ها")
-            tasks = get_tasks(pid)
-            if tasks.empty:
-                st.info("تسکی وجود ندارد.")
-            else:
-                for _, t in tasks.iterrows():
-                    auto_val = calculate_task_progress_from_subtasks(t["id"])
-                    label = t["name"]
-                    if auto_val is not None:
-                        label = f"{t['name']} (درصد از زیرتسک‌ها: {auto_val}%)"
+        st.markdown("---")
+        st.subheader("ویرایش پیشرفت تسک‌ها")
 
-                    new_prog = st.slider(
-                        label,
-                        0, 100, t["progress"],
-                        key=f"edit_task_{t['id']}"
-                    )
-                    if new_prog != t["progress"]:
-                        update_task_progress(t["id"], new_prog)
+        tasks = get_tasks(pid2)
+        for _, t in tasks.iterrows():
+            auto_val = calculate_task_progress_from_subtasks(t["id"])
+            label = t["name"]
+            if auto_val is not None:
+                label += f" (از زیرتسک‌ها {auto_val}%)"
 
-            st.markdown("---")
-            st.markdown("### 🔽 مدیریت زیرتسک‌ها")
+            newp = st.slider(label, 0, 100, t["progress"], key=f"t_{t['id']}")
+            if newp != t["progress"]:
+                update_task_progress(t["id"], newp)
 
-            if tasks.empty:
-                st.info("تسکی نیست که برایش زیرتسک تعریف کنیم.")
-            else:
-                task_label_admin = st.selectbox(
-                    "انتخاب تسک برای زیرتسک‌ها",
-                    tasks.apply(lambda r: f"{r['id']} - {r['name']}", axis=1).tolist(),
-                    key="admin_subtask_task_select"
-                )
-                sub_task_id = int(task_label_admin.split(" - ")[0])
+        # Subtasks
+        st.markdown("---")
+        st.subheader("🔽 زیرتسک‌ها")
 
-                st.markdown("#### ➕ افزودن زیرتسک جدید")
-                sub_name = st.text_input("نام زیرتسک", key="sub_name_admin")
-                sub_prog = st.slider("درصد پیشرفت زیرتسک", 0, 100, 0, key="sub_prog_admin")
+        tlab = st.selectbox(
+            "انتخاب تسک",
+            tasks.apply(lambda r: f"{r['id']} - {r['name']}", axis=1).tolist(),
+            key="subtselect"
+        )
+        sel_tid = int(tlab.split(" - ")[0])
 
-                if st.button("ثبت زیرتسک", key="add_subtask_btn"):
-                    if sub_name.strip():
-                        add_subtask(sub_task_id, sub_name.strip(), sub_prog)
-                        st.success("زیرتسک ثبت شد.")
-                    else:
-                        st.warning("نام زیرتسک را وارد کن.")
+        subname = st.text_input("نام زیرتسک")
+        subprog = st.slider("پیشرفت زیرتسک", 0, 100, 0, key="sbp1")
 
-                st.markdown("#### ✏️ ویرایش زیرتسک‌ها")
-                subs = get_subtasks(sub_task_id)
-                if subs.empty:
-                    st.info("برای این تسک هنوز زیرتسکی تعریف نشده.")
-                else:
-                    for _, sb in subs.iterrows():
-                        col1, col2 = st.columns([2, 3])
-                        with col1:
-                            st.write(f"🔹 {sb['name']}")
-                        with col2:
-                            new_val = st.slider(
-                                f"پیشرفت ({sb['name']})",
-                                0, 100, sb["progress"],
-                                key=f"edit_sub_{sb['id']}"
-                            )
-                            if new_val != sb["progress"]:
-                                update_subtask_progress(sb["id"], new_val)
+        if st.button("افزودن زیرتسک"):
+            add_subtask(sel_tid, subname, subprog)
+            st.success("زیرتسک ثبت شد.")
+
+        st.write("ویرایش زیرتسک‌ها:")
+        subs = get_subtasks(sel_tid)
+        for _, sb in subs.iterrows():
+            np = st.slider(
+                f"{sb['name']}",
+                0, 100, sb["progress"],
+                key=f"sb_{sb['id']}"
+            )
+            if np != sb["progress"]:
+                update_subtask_progress(sb["id"], np)
 
     # -----------------------
-    # TAB 3: MINUTES
+    # MINUTES
     # -----------------------
     with tab3:
         st.subheader("📝 ثبت صورت‌جلسه")
 
-        projects = get_projects()
-        if projects.empty:
-            st.info("اول یک پروژه بساز.")
-        else:
-            p2_name = st.selectbox("انتخاب پروژه", projects["name"].tolist(), key="admin_min_proj")
-            proj2 = projects[projects["name"] == p2_name].iloc[0]
-            pid2 = proj2["id"]
+        pname = st.selectbox("پروژه", projs["name"].tolist(), key="pm3")
+        pidm = projs[projs["name"] == pname].iloc[0]["id"]
 
-            md = st.date_input("تاریخ جلسه", value=date.today(), key="admin_min_date")
-            title = st.text_input("عنوان جلسه", key="admin_min_title")
-            cont = st.text_area("متن صورت‌جلسه", key="admin_min_text")
+        jdate = st.text_input("تاریخ جلسه (شمسی)", key="jmin")
+        title = st.text_input("عنوان")
+        content = st.text_area("متن")
 
-            if st.button("ثبت صورت‌جلسه", key="btn_add_minute"):
-                if title.strip() and cont.strip():
-                    add_minute(pid2, md, title.strip(), cont.strip())
-                    st.success("صورت‌جلسه ثبت شد.")
-                else:
-                    st.warning("عنوان و متن صورت‌جلسه را کامل وارد کن.")
+        if st.button("ثبت صورت‌جلسه"):
+            add_minute(pidm, jalali_to_gregorian(jdate), title, content)
+            st.success("صورت‌جلسه ثبت شد.")
 
-            st.markdown("---")
-            st.subheader("لیست صورت‌جلسه‌ها")
-            mins = get_minutes(pid2)
-            if mins.empty:
-                st.info("برای این پروژه صورت‌جلسه‌ای ثبت نشده.")
-            else:
-                st.dataframe(mins, use_container_width=True)
+        st.markdown("---")
+        st.dataframe(get_minutes(pidm), use_container_width=True)
