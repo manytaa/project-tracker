@@ -53,6 +53,8 @@ def add_project(name, desc, start, end, no_deadline):
         "end_date": None if no_deadline else str(end)
     }).execute()
 
+
+# TASKS
 def get_tasks(pid):
     res = supabase.table("tasks").select("*").eq("project_id", int(pid)).order("id").execute()
     return pd.DataFrame(res.data)
@@ -72,6 +74,8 @@ def update_task_progress(tid, progress):
         "progress": int(progress)
     }).eq("id", int(tid)).execute()
 
+
+# MINUTES
 def get_minutes(pid):
     res = supabase.table("minutes").select("*").eq("project_id", int(pid)).order("meeting_date", desc=True).execute()
     return pd.DataFrame(res.data)
@@ -84,6 +88,8 @@ def add_minute(pid, d, title, content):
         "content": content
     }).execute()
 
+
+# COMMENTS
 def get_task_comments(tid):
     res = supabase.table("task_comments").select("*").eq("task_id", int(tid)).order("id", desc=True).execute()
     return pd.DataFrame(res.data)
@@ -106,10 +112,8 @@ def add_minute_comment(mid, author, content):
         "content": content
     }).execute()
 
-# -----------------------
-# SUBTASKS
-# -----------------------
 
+# SUBTASKS
 def get_subtasks(task_id):
     res = supabase.table("subtasks").select("*").eq("task_id", int(task_id)).order("id").execute()
     return pd.DataFrame(res.data)
@@ -143,9 +147,8 @@ def calculate_project_progress(tasks_df):
 
 
 # -----------------------
-# PAGE UI
+# PAGE STYLE
 # -----------------------
-
 st.markdown("""
 <style>
 .big-title {
@@ -178,6 +181,7 @@ st.markdown("<div class='big-title'>📊 نرم‌افزار کنترل پروژ
 # -----------------------
 mode = st.sidebar.radio("حالت:", ["🔍 نمایش پروژه‌ها", "🛠 مدیریت"], index=0)
 
+
 # -----------------------
 # VIEW MODE
 # -----------------------
@@ -188,7 +192,7 @@ if mode == "🔍 نمایش پروژه‌ها":
         st.info("پروژه‌ای ثبت نشده.")
         st.stop()
 
-    pname = st.selectbox("انتخاب پروژه", projects["name"].tolist())
+    pname = st.selectbox("انتخاب پروژه", projects["name"].tolist(), key="view_sel_proj")
     proj = projects[projects["name"] == pname].iloc[0]
     pid = proj["id"]
 
@@ -199,7 +203,6 @@ if mode == "🔍 نمایش پروژه‌ها":
     col1.write(f"📅 تاریخ شروع: **{gregorian_to_jalali(proj['start_date'])}**")
     col2.write(f"⏳ پایان: **{gregorian_to_jalali(proj['end_date'])}**")
 
-    # Tasks
     tasks = get_tasks(pid)
     if not tasks.empty:
 
@@ -211,7 +214,8 @@ if mode == "🔍 نمایش پروژه‌ها":
         st.subheader("🔎 انتخاب تسک")
         tlabel = st.selectbox(
             "تسک:",
-            tasks.apply(lambda r: f"{r['id']} - {r['name']}", axis=1).tolist()
+            tasks.apply(lambda r: f"{r['id']} - {r['name']}", axis=1).tolist(),
+            key="view_task_sel"
         )
         tid = int(tlabel.split(" - ")[0])
 
@@ -228,13 +232,14 @@ if mode == "🔍 نمایش پروژه‌ها":
         for _, c in comments.iterrows():
             st.markdown(f"**{c['author'] or 'ناشناس'}**: {c['content']}")
 
-        author = st.text_input("نام شما", key="cname")
-        ctext = st.text_area("متن کامنت", key="ctxt")
-        if st.button("ارسال کامنت"):
+        author = st.text_input("نام شما", key="view_comment_name")
+        ctext = st.text_area("متن کامنت", key="view_comment_text")
+        if st.button("ارسال کامنت", key="view_comment_btn"):
             if ctext.strip():
                 add_task_comment(tid, author or None, ctext.strip())
                 st.success("کامنت ثبت شد. صفحه را رفرش کنید.")
 
+        # Subtasks
         st.subheader("🔽 زیرتسک‌ها")
         subs = get_subtasks(tid)
         if subs.empty:
@@ -260,9 +265,9 @@ if mode == "🔍 نمایش پروژه‌ها":
                 for _, c in mcom.iterrows():
                     st.markdown(f"**{c['author'] or 'ناشناس'}**: {c['content']}")
 
-                an = st.text_input(f"نام شما ({m['id']})", key=f"mcname_{m['id']}")
-                tx = st.text_area("کامنت", key=f"mctxt_{m['id']}")
-                if st.button("ثبت کامنت", key=f"mbtn_{m['id']}"):
+                an = st.text_input(f"نام شما ({m['id']})", key=f"min_com_name_{m['id']}")
+                tx = st.text_area("کامنت", key=f"min_com_text_{m['id']}")
+                if st.button("ثبت کامنت", key=f"min_com_btn_{m['id']}"):
                     if tx.strip():
                         add_minute_comment(m["id"], an or None, tx.strip())
                         st.success("ثبت شد.")
@@ -272,7 +277,7 @@ if mode == "🔍 نمایش پروژه‌ها":
 # ADMIN MODE
 # -----------------------
 else:
-    pwd = st.sidebar.text_input("رمز مدیریت", type="password")
+    pwd = st.sidebar.text_input("رمز مدیریت", type="password", key="admin_pass")
     if pwd != ADMIN_PASSWORD:
         st.error("رمز اشتباه است.")
         st.stop()
@@ -281,19 +286,17 @@ else:
 
     tab1, tab2, tab3 = st.tabs(["📁 پروژه‌ها", "🧱 تسک/زیرتسک", "📝 صورت‌جلسه"])
 
-    # -----------------------
     # PROJECTS
-    # -----------------------
     with tab1:
         st.subheader("➕ افزودن پروژه")
 
-        name = st.text_input("نام پروژه")
-        desc = st.text_area("توضیحات")
-        jstart = st.text_input("تاریخ شروع (مثال: 1403-02-15)", key="js1")
-        jend = st.text_input("تاریخ پایان (شمسی)", key="je1")
-        no_deadline = st.checkbox("بدون ددلاین پروژه")
+        name = st.text_input("نام پروژه", key="proj_name")
+        desc = st.text_area("توضیحات", key="proj_desc")
+        jstart = st.text_input("تاریخ شروع (مثال: 1403-02-15)", key="proj_js")
+        jend = st.text_input("تاریخ پایان (شمسی)", key="proj_je")
+        no_deadline = st.checkbox("بدون ددلاین پروژه", key="proj_ndl")
 
-        if st.button("ثبت پروژه"):
+        if st.button("ثبت پروژه", key="proj_add_btn"):
             if name.strip():
                 g_start = jalali_to_gregorian(jstart)
                 g_end = jalali_to_gregorian(jend) if not no_deadline else None
@@ -305,24 +308,23 @@ else:
         st.markdown("---")
         st.dataframe(get_projects(), use_container_width=True)
 
-    # -----------------------
-    # TASKS & SUBTASKS
-    # -----------------------
+
+    # TASKS
     with tab2:
         st.subheader("🧱 مدیریت تسک‌ها")
 
         projs = get_projects()
-        pname = st.selectbox("انتخاب پروژه", projs["name"].tolist(), key="p2")
+        pname = st.selectbox("انتخاب پروژه", projs["name"].tolist(), key="task_proj_sel")
         pid2 = projs[projs["name"] == pname].iloc[0]["id"]
 
-        tname = st.text_input("نام تسک")
-        tdesc = st.text_area("توضیحات")
-        task_owner = st.text_input("مسئول")
-        jdue = st.text_input("مهلت (شمسی) مثال: 1403-01-20")
-        no_dl = st.checkbox("بدون ددلاین", key="ndl1")
-        tprog = st.slider("درصد پیشرفت", 0, 100, 0)
+        tname = st.text_input("نام تسک", key="task_name")
+        tdesc = st.text_area("توضیحات", key="task_desc")
+        task_owner = st.text_input("مسئول", key="task_owner")
+        jdue = st.text_input("مهلت (شمسی)", key="task_jdue")
+        no_dl = st.checkbox("بدون ددلاین", key="task_ndl")
+        tprog = st.slider("درصد پیشرفت", 0, 100, 0, key="task_prog")
 
-        if st.button("افزودن تسک"):
+        if st.button("افزودن تسک", key="task_add_btn"):
             g_due = jalali_to_gregorian(jdue) if not no_dl else None
             add_task(pid2, tname, tdesc, tprog, task_owner, g_due, no_dl)
             st.success("تسک اضافه شد.")
@@ -337,7 +339,7 @@ else:
             if auto_val is not None:
                 label += f" (از زیرتسک‌ها {auto_val}%)"
 
-            newp = st.slider(label, 0, 100, t["progress"], key=f"t_{t['id']}")
+            newp = st.slider(label, 0, 100, t["progress"], key=f"task_edit_{t['id']}")
             if newp != t["progress"]:
                 update_task_progress(t["id"], newp)
 
@@ -345,45 +347,47 @@ else:
         st.markdown("---")
         st.subheader("🔽 زیرتسک‌ها")
 
-        tlab = st.selectbox(
-            "انتخاب تسک",
-            tasks.apply(lambda r: f"{r['id']} - {r['name']}", axis=1).tolist(),
-            key="subtselect"
-        )
-        sel_tid = int(tlab.split(" - ")[0])
-
-        subname = st.text_input("نام زیرتسک")
-        subprog = st.slider("پیشرفت زیرتسک", 0, 100, 0, key="sbp1")
-
-        if st.button("افزودن زیرتسک"):
-            add_subtask(sel_tid, subname, subprog)
-            st.success("زیرتسک ثبت شد.")
-
-        st.write("ویرایش زیرتسک‌ها:")
-        subs = get_subtasks(sel_tid)
-        for _, sb in subs.iterrows():
-            np = st.slider(
-                f"{sb['name']}",
-                0, 100, sb["progress"],
-                key=f"sb_{sb['id']}"
+        if tasks.empty:
+            st.info("هیچ تسکی وجود ندارد.")
+        else:
+            tlab = st.selectbox(
+                "انتخاب تسک",
+                tasks.apply(lambda r: f"{r['id']} - {r['name']}", axis=1).tolist(),
+                key="subtask_sel"
             )
-            if np != sb["progress"]:
-                update_subtask_progress(sb["id"], np)
+            sel_tid = int(tlab.split(" - ")[0])
 
-    # -----------------------
+            subname = st.text_input("نام زیرتسک", key="sb_name")
+            subprog = st.slider("پیشرفت زیرتسک", 0, 100, 0, key="sb_prog")
+
+            if st.button("افزودن زیرتسک", key="sb_add_btn"):
+                add_subtask(sel_tid, subname, subprog)
+                st.success("زیرتسک ثبت شد.")
+
+            st.write("ویرایش زیرتسک‌ها:")
+            subs = get_subtasks(sel_tid)
+            for _, sb in subs.iterrows():
+                np = st.slider(
+                    f"{sb['name']}",
+                    0, 100, sb["progress"],
+                    key=f"sb_edit_{sb['id']}"
+                )
+                if np != sb["progress"]:
+                    update_subtask_progress(sb["id"], np)
+
+
     # MINUTES
-    # -----------------------
     with tab3:
         st.subheader("📝 ثبت صورت‌جلسه")
 
-        pname = st.selectbox("پروژه", projs["name"].tolist(), key="pm3")
+        pname = st.selectbox("پروژه", projs["name"].tolist(), key="min_proj_sel")
         pidm = projs[projs["name"] == pname].iloc[0]["id"]
 
-        jdate = st.text_input("تاریخ جلسه (شمسی)", key="jmin")
-        title = st.text_input("عنوان")
-        content = st.text_area("متن")
+        jdate = st.text_input("تاریخ جلسه (شمسی)", key="min_jdate")
+        title = st.text_input("عنوان", key="min_title")
+        content = st.text_area("متن", key="min_text")
 
-        if st.button("ثبت صورت‌جلسه"):
+        if st.button("ثبت صورت‌جلسه", key="min_add_btn"):
             add_minute(pidm, jalali_to_gregorian(jdate), title, content)
             st.success("صورت‌جلسه ثبت شد.")
 
